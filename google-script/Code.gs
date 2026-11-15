@@ -12,6 +12,9 @@
  *                Edit names / usual sizes here. Never share the codes publicly.
  *   Answers    — one row per household per date (written by the website).
  *
+ * Households tab, column "hidden": put yes to hide a household (e.g. a surprise) from every
+ * other household — their row, answers and headcounts. Only they and the admin still see them.
+ *
  * Nobody can read or change anything without a valid household code.
  * A household can change only its own answers; an admin household can change everyone's.
  */
@@ -29,6 +32,9 @@ const HOUSEHOLDS = [
   ['batijr',      'Bati Jr',          4, false],
 ];
 
+// Hidden from other households when the "hidden" column is first added. Change it later in the sheet.
+const HIDDEN_AT_START = ['vaisiboni'];
+
 const DATES = [
   '2026-12-22', '2026-12-23', '2026-12-24', '2026-12-25', '2026-12-26', '2026-12-27', '2026-12-28',
   '2026-12-29', '2026-12-30', '2026-12-31', '2027-01-01', '2027-01-02', '2027-01-03',
@@ -43,14 +49,26 @@ function setup() {
   if (h.getLastRow() === 0) {
     h.getRange('A:F').setNumberFormat('@'); // keep codes as plain text
     h.getRange('C:C').setNumberFormat('0');
-    h.appendRow(['id', 'name', 'usual_size', 'admin', 'code', 'personal_link']);
+    h.appendRow(['id', 'name', 'usual_size', 'admin', 'code', 'personal_link', 'hidden']);
     HOUSEHOLDS.forEach(([id, name, size, admin]) => {
       const code = newCode_();
-      h.appendRow([id, name, size, admin ? 'yes' : 'no', code, SITE_URL + '?h=' + code]);
+      h.appendRow([id, name, size, admin ? 'yes' : 'no', code, SITE_URL + '?h=' + code, HIDDEN_AT_START.indexOf(id) >= 0 ? 'yes' : 'no']);
     });
     h.setFrozenRows(1);
-    h.getRange(1, 1, 1, 6).setFontWeight('bold');
-    h.autoResizeColumns(1, 6);
+    h.getRange(1, 1, 1, 7).setFontWeight('bold');
+    h.autoResizeColumns(1, 7);
+  }
+
+  // Older sheets: add the "hidden" column without touching anything else.
+  const header = h.getRange(1, 1, 1, h.getLastColumn()).getValues()[0].map(String);
+  if (header.indexOf('hidden') < 0) {
+    const col = header.length + 1;
+    h.getRange(1, col).setValue('hidden');
+    h.getRange(1, col).setFontWeight('bold');
+    for (let r = 2; r <= h.getLastRow(); r++) {
+      const id = String(h.getRange(r, 1).getValue()).trim();
+      if (id) h.getRange(r, col).setValue(HIDDEN_AT_START.indexOf(id) >= 0 ? 'yes' : 'no');
+    }
   }
 
   let a = ss.getSheetByName('Answers');
@@ -119,7 +137,9 @@ function doPost(e) {
 
 function households_() {
   const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Households');
-  return sh.getDataRange().getValues().slice(1)
+  const all = sh.getDataRange().getValues();
+  const hiddenCol = all[0].map(String).indexOf('hidden');
+  return all.slice(1)
     .filter(r => String(r[0]).trim())
     .map(r => ({
       id: String(r[0]).trim(),
@@ -127,22 +147,31 @@ function households_() {
       size: Math.max(1, Number(r[2]) || 1),
       admin: String(r[3]).trim().toLowerCase() === 'yes',
       code: String(r[4]).trim(),
+      hidden: hiddenCol >= 0 && String(r[hiddenCol]).trim().toLowerCase() === 'yes',
     }));
 }
 
 function state_(me, hs) {
+  // Hidden households are left out completely for everyone except themselves and the admin.
+  const visible = hs.filter(x => me.admin || x.id === me.id || !x.hidden);
+  const ids = {};
+  visible.forEach(x => { ids[x.id] = true; });
   const resp = {};
   const rows = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Answers').getDataRange().getValues().slice(1);
   rows.forEach(r => {
     const hid = String(r[0]), d = dateStr_(r[1]), ans = String(r[2]);
-    if (!hid || DATES.indexOf(d) < 0) return;
+    if (!hid || !ids[hid] || DATES.indexOf(d) < 0) return;
     if (ans === 'in') (resp[hid] = resp[hid] || {})[d] = { in: true, n: Math.max(1, Number(r[3]) || 1) };
     else if (ans === 'out') (resp[hid] = resp[hid] || {})[d] = { in: false };
   });
   return {
     ok: true,
     me: me.id,
-    households: hs.map(x => ({ id: x.id, name: x.name, size: x.size, admin: x.admin })),
+    households: visible.map(x => {
+      const o = { id: x.id, name: x.name, size: x.size, admin: x.admin };
+      if (me.admin && x.hidden) o.hidden = true;
+      return o;
+    }),
     resp: resp,
   };
 }
