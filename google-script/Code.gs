@@ -32,7 +32,7 @@ const HOUSEHOLDS = [
 ];
 
 // Hidden from other households when the "hidden" column is first added. Change it later in the sheet.
-const HIDDEN_AT_START = ['vaisiboni'];
+const HIDDEN_AT_START = [];
 
 const DATES = [
   '2026-12-22', '2026-12-23', '2026-12-24', '2026-12-25', '2026-12-26', '2026-12-27', '2026-12-28',
